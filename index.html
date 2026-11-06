@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Opinion Survey</title>
+
+  <!-- jsPsych 7 (pinned) -->
+  <script src="https://unpkg.com/jspsych@7.3.4"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-html-button-response@1.2.0"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-html-keyboard-response@1.1.3"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-call-function@1.1.3"></script>
+  <!-- DataPipe (OSF) saving — only used if DATAPIPE_EXPERIMENT_ID is set -->
+  <script src="https://unpkg.com/@jspsych-contrib/plugin-pipe@0.3"></script>
+  <link rel="stylesheet" href="https://unpkg.com/jspsych@7.3.4/css/jspsych.css" />
+
+  <script src="items.js"></script>
+
+  <style>
+    body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1d1d1f; }
+    .jspsych-content { max-width: 860px; }
+    .stem { font-size: 19px; line-height: 1.5; text-align: left; margin: 0 auto 26px; max-width: 760px; }
+    .instr { font-size: 18px; line-height: 1.55; text-align: left; max-width: 700px; margin: 0 auto 20px; }
+
+    /* countdown bar */
+    .timer { width: 100%; max-width: 760px; height: 6px; background: #e5e5ea; border-radius: 3px; margin: 0 auto 28px; overflow: hidden; }
+    .timer-fill { height: 100%; width: 100%; background: #3a7bd5; }
+
+    /* 7-point scale: endpoint labels sit above buttons 1 and 7 */
+    .ends { display: flex; justify-content: space-between; max-width: 700px; margin: 0 auto 8px; font-size: 14px; color: #555; gap: 24px; }
+    .ends span { max-width: 44%; line-height: 1.35; text-align: left; }
+    .ends span:last-child { text-align: right; }
+
+    #jspsych-html-button-response-btngroup { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; max-width: 760px; margin: 0 auto; }
+    #jspsych-html-button-response-btngroup .jspsych-btn { margin: 0; }
+    .btn-num { min-width: 64px; font-size: 20px; padding: 12px 0; }
+    .btn-txt { min-width: 150px; font-size: 16px; padding: 12px 16px; white-space: normal; }
+    .btn-dk { font-size: 14px; color: #666; background: #f5f5f7; padding: 10px 16px; }
+    .scale7 #jspsych-html-button-response-btngroup { max-width: 700px; justify-content: space-between; }
+    .scale7 #jspsych-html-button-response-btngroup > div:has(.btn-dk) { flex-basis: 100%; display: flex; justify-content: center; margin-top: 14px; }
+    .vertical #jspsych-html-button-response-btngroup { flex-direction: column; align-items: center; }
+    .vertical .btn-txt { min-width: 340px; }
+
+    .muted { color: #888; font-size: 18px; }
+  </style>
+</head>
+<body></body>
+
+<script>
+/* =====================================================================
+   CONFIG — edit these
+   ===================================================================== */
+const CONFIG = {
+  // Time limit per screen = BASE + PER_WORD × (words on screen), capped at MAX.
+  // Long ANES 7-point stems (~90 words) need ~20 s just to read; short
+  // follow-ups ("Do you favor that a great deal…") get ~6 s.
+  // For one fixed limit on every screen, set PER_WORD_MS: 0 and BASE_MS to the limit.
+  BASE_MS: 4000,
+  PER_WORD_MS: 200,
+  MAX_MS: 30000,
+
+  ITI_MS: 400,                     // blank gap between trials
+  TIMEOUT_MSG_MS: 800,             // "Moving on…" shown only after a timeout
+  RANDOMIZE_ITEM_ORDER: true,      // shuffle issue items (follow-ups stay attached)
+  RANDOMIZE_RESPONSE_ORDER: true,  // ANES-style: per participant, flip favor/oppose order
+  SHOW_HAVENT_THOUGHT: true,       // offer "Haven't thought much about this" (coded 99) on 7-pt scales
+  ATTENTION_CHECK: true,
+
+  PROLIFIC_COMPLETION_CODE: "REPLACE_ME",
+  DATAPIPE_EXPERIMENT_ID: "",      // from pipe.jspsych.org; blank = download CSV locally (testing)
+};
+
+/* ===================================================================== */
+const jsPsych = initJsPsych({
+  on_finish: () => {
+    const debug = jsPsych.data.getURLVariable("debug");
+    if (!CONFIG.DATAPIPE_EXPERIMENT_ID) {
+      jsPsych.data.get().localSave("csv", `anes_task_${PID}.csv`);
+    }
+    if (debug) { jsPsych.data.displayData("csv"); return; }
+    if (jsPsych.data.getURLVariable("PROLIFIC_PID")) {
+      window.location = "https://app.prolific.com/submissions/complete?cc=" + CONFIG.PROLIFIC_COMPLETION_CODE;
+    } else {
+      document.body.innerHTML = '<p style="text-align:center;margin-top:20vh;font-size:20px">Thank you — you\'re all done.</p>';
+    }
+  },
+});
+
+const PID = jsPsych.data.getURLVariable("PROLIFIC_PID") || jsPsych.randomization.randomID(10);
+const REVERSED = CONFIG.RANDOMIZE_RESPONSE_ORDER ? Math.random() < 0.5 : false;
+
+jsPsych.data.addProperties({
+  prolific_pid: PID,
+  study_id: jsPsych.data.getURLVariable("STUDY_ID") || "",
+  session_id: jsPsych.data.getURLVariable("SESSION_ID") || "",
+  response_order: REVERSED ? "reversed" : "forward",
+});
+
+/* ---------------------------- helpers -------------------------------- */
+const wordCount = (s) => s.replace(/<[^>]+>/g, " ").trim().split(/\s+/).filter(Boolean).length;
+const limitFor = (text) =>
+  Math.min(CONFIG.MAX_MS, Math.round(CONFIG.BASE_MS + CONFIG.PER_WORD_MS * wordCount(text)));
+
+const timerBar = '<div class="timer"><div class="timer-fill" id="timer-fill"></div></div>';
+function startTimer(ms) {
+  const el = document.getElementById("timer-fill");
+  if (!el) return;
+  requestAnimationFrame(() => {
+    el.style.transition = `width ${ms}ms linear`;
+    requestAnimationFrame(() => (el.style.width = "0%"));
+  });
+}
+
+/* One timed trial. options: [{label, code, cls}] ; extra goes into data. */
+function timedTrial({ stimulus, options, cssClass = "", limitText, data }) {
+  const limit = limitFor(limitText);
+  return {
+    type: jsPsychHtmlButtonResponse,
+    stimulus: timerBar + stimulus,
+    choices: options.map((o) => o.label),
+    button_html: options.map((o) => `<button class="jspsych-btn ${o.cls || "btn-txt"}">%choice%</button>`),
+    trial_duration: limit,
+    response_ends_trial: true,
+    css_classes: cssClass ? [cssClass] : [],
+    on_load: () => startTimer(limit),
+    data: Object.assign({ task: "anes", time_limit_ms: limit, option_order: options.map((o) => o.code).join("|") }, data),
+    on_finish: (d) => {
+      d.timed_out = d.response === null;
+      d.code = d.timed_out ? null : options[d.response].code;
+      d.response_label = d.timed_out ? null : options[d.response].label;
+    },
+  };
+}
+
+const timeoutNotice = {
+  timeline: [{
+    type: jsPsychHtmlKeyboardResponse,
+    stimulus: '<p class="muted">Moving on…</p>',
+    choices: "NO_KEYS",
+    trial_duration: CONFIG.TIMEOUT_MSG_MS,
+    data: { task: "timeout_notice" },
+  }],
+  conditional_function: () => jsPsych.data.get().last(1).values()[0].timed_out === true,
+};
+
+const iti = { type: jsPsychHtmlKeyboardResponse, stimulus: "", choices: "NO_KEYS", trial_duration: CONFIG.ITI_MS, data: { task: "iti" } };
+
+const maybeRev = (arr) => (REVERSED ? [...arr].reverse() : arr);
+
+/* --------------------------- item builders --------------------------- */
+function buildScale7(item) {
+  const nums = [1, 2, 3, 4, 5, 6, 7].map((n) => ({ label: String(n), code: n, cls: "btn-num" }));
+  const options = CONFIG.SHOW_HAVENT_THOUGHT
+    ? [...nums, { label: "Haven't thought much about this", code: 99, cls: "btn-dk" }]
+    : nums;
+  const stim = `<p class="stem">${item.stem}</p>
+    <div class="ends"><span>1 = ${item.left}</span><span>7 = ${item.right}</span></div>`;
+  return [timedTrial({
+    stimulus: stim, options, cssClass: "scale7",
+    limitText: item.stem + " " + item.left + " " + item.right,
+    data: { item_id: item.id, anes_var: item.anes_var, step: "single" },
+  }), timeoutNotice];
+}
+
+function buildLikert5(item) {
+  const options = item.opts.map((o) => ({ ...o, cls: "btn-txt" }));
+  return [timedTrial({
+    stimulus: `<p class="stem">${item.stem}</p>`,
+    options: maybeRev(options), cssClass: "vertical",
+    limitText: item.stem + " " + item.opts.map((o) => o.label).join(" "),
+    data: { item_id: item.id, anes_var: item.anes_var, step: "single", block: item.block || "" },
+  }), timeoutNotice];
+}
+
+/* ANES favor/oppose → strength, combined to 1–7:
+   1 favor great deal · 2 favor moderate · 3 favor little · 4 neither ·
+   5 oppose little · 6 oppose moderate · 7 oppose great deal            */
+function buildBranch(item) {
+  const step1Opts = [
+    ...maybeRev([{ label: "Favor", code: "favor" }, { label: "Oppose", code: "oppose" }]),
+    { label: "Neither favor nor oppose", code: "neither" },
+  ];
+  const step1 = timedTrial({
+    stimulus: `<p class="stem">${item.stem1}</p>`,
+    options: step1Opts, cssClass: "vertical",
+    limitText: item.stem1 + " favor oppose neither favor nor oppose",
+    data: { item_id: item.id, anes_var: item.anes_var, step: "direction" },
+  });
+
+  const strength = { "great": "A great deal", "moderate": "A moderate amount", "little": "A little" };
+  const step2For = (dir) => {
+    let opts = ["great", "moderate", "little"].map((k) => ({ label: strength[k], code: k }));
+    if (REVERSED) opts = opts.reverse();
+    const stem2 = REVERSED
+      ? `Do you ${dir} that a little, a moderate amount, or a great deal?`
+      : `Do you ${dir} that a great deal, a moderate amount, or a little?`;
+    return timedTrial({
+      stimulus: `<p class="stem">${stem2}</p>`,
+      options: opts, cssClass: "vertical",
+      limitText: stem2 + " a great deal a moderate amount a little",
+      data: { item_id: item.id, anes_var: item.anes_var, step: "strength", direction: dir },
+    });
+  };
+  const followUp = (dir) => ({
+    timeline: [step2For(dir), timeoutNotice],
+    conditional_function: () => lastDirection(item.id) === dir,
+  });
+  return [step1, timeoutNotice, followUp("favor"), followUp("oppose")];
+}
+
+function buildBranch5(item) {
+  const step1Opts = [...maybeRev(item.opts1.map((o) => ({ label: o.label, code: o.key }))),
+                     { label: item.middle.label, code: item.middle.key }];
+  const step1 = timedTrial({
+    stimulus: `<p class="stem">${item.stem1}</p>`,
+    options: step1Opts, cssClass: "vertical",
+    limitText: item.stem1 + " " + step1Opts.map((o) => o.label).join(" "),
+    data: { item_id: item.id, anes_var: item.anes_var, step: "direction" },
+  });
+  const followUp = (dir) => ({
+    timeline: [timedTrial({
+      stimulus: `<p class="stem">${item.stem2(dir)}</p>`,
+      options: maybeRev([{ label: "A lot", code: "lot" }, { label: "A little", code: "little" }]),
+      cssClass: "vertical",
+      limitText: item.stem2(dir) + " a lot a little",
+      data: { item_id: item.id, anes_var: item.anes_var, step: "strength", direction: dir },
+    }), timeoutNotice],
+    conditional_function: () => lastDirection(item.id) === dir,
+  });
+  return [step1, timeoutNotice, followUp("inc"), followUp("dec")];
+}
+
+function lastDirection(itemId) {
+  const r = jsPsych.data.get().filter({ task: "anes", item_id: itemId, step: "direction" }).last(1).values()[0];
+  return r ? r.code : null;
+}
+
+function buildItem(item) {
+  const parts = { scale7: buildScale7, likert5: buildLikert5, branch: buildBranch, branch5: buildBranch5 }[item.type](item);
+  return { timeline: [...parts, iti] };
+}
+
+/* ------------------------- summary scoring --------------------------- */
+// Produces one wide row with ANES-coded values, named by ANES variable,
+// so it lines up with the columns of cleaned_anes_timeseries_2024.csv.
+function scoreAll() {
+  const rows = jsPsych.data.get().filter({ task: "anes" }).values();
+  const out = {};
+  for (const item of ANES_ITEMS) {
+    const r = rows.filter((x) => x.item_id === item.id);
+    const single = r.find((x) => x.step === "single");
+    const dir = r.find((x) => x.step === "direction");
+    const str = r.find((x) => x.step === "strength");
+    let v = null;
+    if (item.type === "scale7" || item.type === "likert5") {
+      v = single ? single.code : null;
+    } else if (item.type === "branch") {
+      if (dir && dir.code === "neither") v = 4;
+      else if (dir && str && str.code) {
+        const m = { great: 1, moderate: 2, little: 3 }[str.code];
+        v = dir.code === "favor" ? m : 8 - m;
+      }
+    } else if (item.type === "branch5") {
+      if (dir && dir.code === "same") v = 3;
+      else if (dir && str && str.code) v = item.combine(dir.code, str.code);
+    }
+    out[item.anes_var] = v;
+    out[item.id] = v;
+  }
+  // Racial resentment composite, same as Mia's script: reverse V242300 & V242303
+  // (6 - x on a 1–5 scale), average; higher = less resentment. Needs all four.
+  const rr = ["V242300", "V242301", "V242302", "V242303"].map((k) => out[k]);
+  if (rr.every((x) => x !== null && x !== 99)) {
+    const adj = [6 - rr[0], rr[1], rr[2], 6 - rr[3]];
+    out.racial_resentment = adj.reduce((a, b) => a + b, 0) / 4;
+  } else out.racial_resentment = null;
+  out.Racial_Res = out.racial_resentment;
+
+  const ideo = jsPsych.data.get().filter({ task: "ideology" }).values()[0];
+  out.V241177 = ideo ? ideo.code : null;
+  out.n_timeouts = rows.filter((x) => x.timed_out).length;
+  const ac = jsPsych.data.get().filter({ task: "attention_check" }).values()[0];
+  out.attention_pass = ac ? ac.passed : null;
+  return out;
+}
+
+/* ----------------------------- timeline ------------------------------ */
+const timeline = [];
+
+timeline.push({
+  type: jsPsychHtmlButtonResponse,
+  stimulus: `<div class="instr">
+      <h2>Welcome</h2>
+      <p>In this study you will answer a series of questions about public issues and government policy.</p>
+      <p>Each question has a <b>time limit</b>, shown by the blue bar at the top, which shrinks as time runs out.
+      Answer by clicking a button. As soon as you answer, the next question appears.</p>
+      <p>If the bar runs out before you answer, the study simply moves on. There are no right or wrong answers —
+      we're interested in your own views.</p>
+      <p>Some questions come in two parts: first whether you favor or oppose something, then how strongly.</p></div>`,
+  choices: ["Start practice"],
+  data: { task: "instructions" },
+});
+
+// one practice trial so people see the timer before real items
+timeline.push(timedTrial({
+  stimulus: `<p class="stem">Practice: Some people prefer living in a big city. Suppose these people are at point 1.
+    Others prefer living in the countryside. Suppose these people are at point 7. Where would you place yourself?</p>
+    <div class="ends"><span>1 = Big city</span><span>7 = Countryside</span></div>`,
+  options: [1, 2, 3, 4, 5, 6, 7].map((n) => ({ label: String(n), code: n, cls: "btn-num" })),
+  cssClass: "scale7",
+  limitText: "Practice Some people prefer living in a big city Suppose these people are at point Others prefer living in the countryside Suppose these people are at point Where would you place yourself",
+  data: { task: "practice", item_id: "practice" },
+}));
+timeline.push(iti);
+
+timeline.push({
+  type: jsPsychHtmlButtonResponse,
+  stimulus: `<div class="instr"><p>That's the idea. The real questions start now.</p></div>`,
+  choices: ["Begin"],
+  data: { task: "instructions" },
+});
+
+let itemBlocks = ANES_ITEMS.map(buildItem);
+if (CONFIG.RANDOMIZE_ITEM_ORDER) itemBlocks = jsPsych.randomization.shuffle(itemBlocks);
+
+if (CONFIG.ATTENTION_CHECK) {
+  const target = "A moderate amount";
+  const opts = ["Not at all", "A little", "A moderate amount", "A lot", "A great deal"].map((l) => ({ label: l, code: l }));
+  const ac = timedTrial({
+    stimulus: `<p class="stem">To show that you are reading carefully, please select "<b>${target}</b>" for this question.</p>`,
+    options: opts, cssClass: "vertical",
+    limitText: "To show that you are reading carefully please select a moderate amount for this question " + opts.map((o) => o.label).join(" "),
+    data: { task: "attention_check", item_id: "attention_check" },
+  });
+  const origFinish = ac.on_finish;
+  ac.on_finish = (d) => { origFinish(d); d.passed = d.code === target; };
+  const pos = Math.floor(itemBlocks.length / 2) + Math.floor(Math.random() * 3) - 1;
+  itemBlocks.splice(pos, 0, { timeline: [ac, iti] });
+}
+timeline.push(...itemBlocks);
+
+// Ideology self-placement — untimed, needed to split into lib / mod / con
+timeline.push({
+  type: jsPsychHtmlButtonResponse,
+  stimulus: `<p class="stem">${IDEOLOGY_ITEM.stem}</p>`,
+  choices: [...IDEOLOGY_ITEM.opts.map((o) => o.label), "Haven't thought much about this"],
+  button_html: '<button class="jspsych-btn btn-txt">%choice%</button>',
+  css_classes: ["vertical"],
+  data: { task: "ideology", anes_var: IDEOLOGY_ITEM.anes_var },
+  on_finish: (d) => { d.code = d.response < 7 ? IDEOLOGY_ITEM.opts[d.response].code : 99; },
+});
+
+timeline.push({
+  type: jsPsychCallFunction,
+  func: () => {},
+  on_finish: (d) => { d.task = "summary"; Object.assign(d, scoreAll()); },
+});
+
+if (CONFIG.DATAPIPE_EXPERIMENT_ID) {
+  timeline.push({
+    type: jsPsychPipe,
+    action: "save",
+    experiment_id: CONFIG.DATAPIPE_EXPERIMENT_ID,
+    filename: `${PID}.csv`,
+    data_string: () => jsPsych.data.get().csv(),
+  });
+}
+
+jsPsych.run(timeline);
+</script>
+</html>
