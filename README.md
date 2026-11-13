@@ -19,7 +19,12 @@ Two-step coding follows ANES: 1 = favor a great deal … 4 = neither … 7 = opp
 At the end, the task asks the untimed liberal–conservative self-placement (V241177), so you can split participants the same way Mia does (≤2 / 4 / ≥6).
 
 ## Output
-Long format: one row per screen, with `item_id`, `anes_var`, `step`, `code`, `rt`, `timed_out`, `time_limit_ms` and `option_order`. The final row (`task == "summary"`) is wide. It has one column per ANES variable (V241239, V242328x, …) in ANES's original coding, plus `racial_resentment` (computed as in Mia's script), `V241177`, `n_timeouts` and `attention_pass`. That row can go straight into Mia's pipeline, which applies her reverse-coding and drops the 99s.
+Each participant produces two CSV files in the DataPipe Google Drive folder:
+
+- `<PROLIFIC_PID>_summary.csv`: one row, with one column per issue (Services, Defense, …, Trans_Bath, Racial_Res) in ANES coding, plus Ideology (V241177), minutes, n_timeouts and attention_pass. To combine participants, stack these files.
+- `<PROLIFIC_PID>_answers.csv`: one row per question screen, with question, part (step 1/2 for two-step items), answer, code, rt_ms, timed_out and time_limit_ms.
+
+Column → ANES variable: Services V241239 · Defense V241242 · Jobs V241252 · Insur V241245 · Aid_to_Black V241255 · Enviro V241258 · Immigration V241269x · Abortion V241248 · Guns V242328x · Affirm_Act V242245x · Climate V242321 · Trans_Bath V241372x · Trans_Sports V241375x · RR_workway V242300 · RR_slavery V242301 · RR_deserve V242302 · RR_tryharder V242303 · Ideology V241177. Values are in ANES's original coding (before Mia's reverse-coding), and 99 means "Haven't thought much about this". Racial_Res is the composite computed as in Mia's script (higher = less resentment).
 
 ## Timing
 Time limit = `BASE_MS + PER_WORD_MS × words on screen`, capped at `MAX_MS`. The defaults are 4 s + 0.2 s/word, which gives about 8 s for "Do you favor that a great deal…?" and about 26 s for the long 7-point stems. For one fixed limit on every screen, set `PER_WORD_MS: 0`.
